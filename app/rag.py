@@ -4,10 +4,14 @@ from pathlib import Path
 import chromadb
 import os
 from google import genai
+import tempfile
 
 EMBEDDING_MODEL = "gemini-embedding-001"
 CHAT_MODEL = "gemini-3.8-flash"
 COLLECTION_NAME = "maintenance_manuals_gemini"
+
+DB_PATH = Path(tempfile.gettempdir()) / "maintenance_chroma_db"
+
 
 def get_gemini_client():
     api_key = os.getenv("GEMINI_API_KEY")
@@ -103,9 +107,8 @@ def save_embeddings(chunks, embeddings, source):
 
     source = str(source)
 
-    db_path = Path(__file__).resolve().parent.parent / "chroma_db"
 
-    client = chromadb.PersistentClient(path=str(db_path))
+    client = chromadb.PersistentClient(path=str(DB_PATH))
 
     collection = client.get_or_create_collection(
         name=COLLECTION_NAME,
@@ -151,8 +154,7 @@ def retrieve_chunks(question, n_results = 4, source=None):
     if n_results < 1:
         raise ValueError("n_results must be at least 1.")
 
-    db_path = Path(__file__).resolve().parent.parent / "chroma_db"
-    client = chromadb.PersistentClient(path=str(db_path))
+    client = chromadb.PersistentClient(path=str(DB_PATH))
 
     collection = client.get_collection(
         name=COLLECTION_NAME,
