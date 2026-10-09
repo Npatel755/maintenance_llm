@@ -3,27 +3,28 @@ import ollama
 from pathlib import Path
 import chromadb
 import os
-from openai import OpenAI
+from google import genai
 
-EMBEDDING_MODEL = "text-embedding-3-small"
-CHAT_MODEL = "gpt-4o-mini"
+EMBEDDING_MODEL = "gemini-embedding-001"
+CHAT_MODEL = "gemini-3.8-flash"
 
-def get_openai_client():
-    api_key = os.getenv("OPENAI_API_KEY")
+def get_gemini_client():
+    api_key = os.getenv("GEMINI_API_KEY")
 
     if not api_key:
         try:
             import streamlit as st
-            api_key = st.secrets.get("OPENAI_API_KEY")
+            api_key = st.secrets.get("GEMINI_API_KEY")
         except Exception:
             pass
 
     if not api_key:
         raise ValueError(
-            "OPENAI_API_KEY is missing. Add it to Streamlit Secrets."
+            "GEMINI_API_KEY is missing. "
+            "Add it to Streamlit Cloud Secrets."
         )
 
-    return OpenAI(api_key=api_key)
+    return genai.Client(api_key=api_key)
 
 def extract_pdf(pdf_path):
     document = pymupdf.open(pdf_path)
@@ -71,29 +72,25 @@ def chunk_pages(pages, chunk_size=1000, overlap=200):
     return chunks
 
 def embed_chunks(chunks, batch_size=32):
-    client = get_openai_client()
+    client = get_gemini_client()
     embeddings = []
 
-    for start in range(0,len(chunks),batch_size):
+    for start in range(0, len(chunks), batch_size):
         batch = chunks[start:start + batch_size]
 
-        texts = [
-            f"search_document: {chunk['text']}"
-            for chunk in batch
-        ]
-
-        response = client.embeddings.create(
+        response = client.models.embed_content(
             model=EMBEDDING_MODEL,
-            input=[chunk["text"] for chunk in batch],
+            contents=[chunk["text"] for chunk in batch],
         )
 
         embeddings.extend(
-            item.embedding
-            for item in response.data
+            embedding.values
+            for embedding in response.embeddings
         )
 
         completed = start + len(batch)
         print(f"Embedded: {completed}/{len(chunks)} chunks")
+
     return embeddings
 
 def save_embeddings(chunks, embeddings, source):
@@ -146,7 +143,7 @@ def save_embeddings(chunks, embeddings, source):
 
 
 def retrieve_chunks(question, n_results = 4, source=None):
-    client = get_openai_client()
+    client = get_gemini_client()
     if not question.strip():
         raise ValueError("Please enter a question.")
 
@@ -166,15 +163,16 @@ def retrieve_chunks(question, n_results = 4, source=None):
     if stored_count == 0:
         raise ValueError("The collection is empty. Index your manual first.")
 
-    response = client.embeddings.create(
+    response = client.models.embed_content(
         model=EMBEDDING_MODEL,
-        input=question,
+        contents=question,
     )
-    query_embedding = response.data[0].embedding
+
+    query_embedding = response.embeddings[0].values
     query_options = {
         "query_embeddings": [query_embedding],
         "n_results": min(n_results, stored_count),
-        "include": ["documents", "metadatas", "distances"]
+        "include": ["documents", "metadatas", "distances"],
     }
 
     if source is not None:
@@ -199,7 +197,7 @@ def retrieve_chunks(question, n_results = 4, source=None):
 
 
 def answer_question(question, n_results=4,source=None):
-    client = get_openai_client()
+    client = get_gemini_client()
     matches = retrieve_chunks(question,n_results=n_results,source=source)
 
     if not matches:
@@ -241,26 +239,16 @@ Keep the answer clear and direct.
         f"Question: {question}"
     )
 
-    response = client.chat.completions.create(
+    interaction = client.interactions.create(
         model=CHAT_MODEL,
-        messages=[
-            {
-                "role": "system",
-                "content": system_prompt,
-            },
-            {
-                "role": "user",
-                "content": user_prompt,
-            },
-        ],
-        temperature=0,
+        system_instruction=system_prompt,
+        input=user_prompt,
     )
 
     return {
-        "answer": response.choices[0].message.content,
+        "answer": interaction.output_text,
         "sources": matches,
     }
-
 
 
 if __name__ == "__main__":

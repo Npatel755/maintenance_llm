@@ -11,3 +11,4 @@ requests
 pytest
 httpx
 openai
+google-genai
