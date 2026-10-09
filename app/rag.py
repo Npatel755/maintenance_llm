@@ -146,40 +146,61 @@ def save_embeddings(chunks, embeddings, source):
     return collection
 
 
-def retrieve_chunks(question, n_results = 4, source=None):
-    client = get_gemini_client()
+def retrieve_chunks(question, n_results=4, source=None):
     if not question.strip():
         raise ValueError("Please enter a question.")
 
     if n_results < 1:
         raise ValueError("n_results must be at least 1.")
 
-    client = chromadb.PersistentClient(path=str(DB_PATH))
-
-    collection = client.get_collection(
-        name=COLLECTION_NAME,
-        embedding_function=None
+    chroma_client = chromadb.PersistentClient(
+        path=str(DB_PATH)
     )
 
-    stored_count = collection.count()
+    collection = chroma_client.get_collection(
+        name=COLLECTION_NAME,
+        embedding_function=None,
+    )
 
-    if stored_count == 0:
-        raise ValueError("The collection is empty. Index your manual first.")
+    if source is None:
+        available_count = collection.count()
+    else:
+        source_records = collection.get(
+            where={"source": str(source)},
+            include=["metadatas"],
+        )
 
-    response = client.models.embed_content(
+        available_count = len(source_records["ids"])
+
+    if available_count == 0:
+        raise ValueError(
+            "No indexed passages were found for this manual."
+        )
+
+    # Keep this as a separate Gemini client.
+    gemini_client = get_gemini_client()
+
+    response = gemini_client.models.embed_content(
         model=EMBEDDING_MODEL,
         contents=question,
     )
 
     query_embedding = response.embeddings[0].values
+
     query_options = {
         "query_embeddings": [query_embedding],
-        "n_results": min(n_results, stored_count),
-        "include": ["documents", "metadatas", "distances"],
+        "n_results": min(n_results, available_count),
+        "include": [
+            "documents",
+            "metadatas",
+            "distances",
+        ],
     }
 
     if source is not None:
-        query_options["where"] = {"source": source}
+        query_options["where"] = {
+            "source": str(source)
+        }
 
     results = collection.query(**query_options)
 
@@ -188,14 +209,17 @@ def retrieve_chunks(question, n_results = 4, source=None):
     for text, metadata, distance in zip(
         results["documents"][0],
         results["metadatas"][0],
-        results["distances"][0]
+        results["distances"][0],
     ):
-        matches.append({
-            "text": text,
-            "page": metadata["page"],
-            "source": metadata["source"],
-            "distance": distance
-        })
+        matches.append(
+            {
+                "text": text,
+                "page": metadata["page"],
+                "source": metadata["source"],
+                "distance": distance,
+            }
+        )
+
     return matches
 
 
