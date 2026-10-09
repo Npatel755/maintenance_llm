@@ -2,9 +2,28 @@ import pymupdf
 import ollama
 from pathlib import Path
 import chromadb
+import os
+from openai import OpenAI
 
-EMBEDDING_MODEL = "nomic-embed-text"
-CHAT_MODEL = "llama3.2:3b"
+EMBEDDING_MODEL = "text-embedding-3-small"
+CHAT_MODEL = "gpt-4o-mini"
+
+def get_openai_client():
+    api_key = os.getenv("OPENAI_API_KEY")
+
+    if not api_key:
+        try:
+            import streamlit as st
+            api_key = st.secrets.get("OPENAI_API_KEY")
+        except Exception:
+            pass
+
+    if not api_key:
+        raise ValueError(
+            "OPENAI_API_KEY is missing. Add it to Streamlit Secrets."
+        )
+
+    return OpenAI(api_key=api_key)
 
 def extract_pdf(pdf_path):
     document = pymupdf.open(pdf_path)
@@ -52,6 +71,7 @@ def chunk_pages(pages, chunk_size=1000, overlap=200):
     return chunks
 
 def embed_chunks(chunks, batch_size=32):
+    client = get_openai_client()
     embeddings = []
 
     for start in range(0,len(chunks),batch_size):
@@ -62,12 +82,15 @@ def embed_chunks(chunks, batch_size=32):
             for chunk in batch
         ]
 
-        response = ollama.embed(
+        response = client.embeddings.create(
             model=EMBEDDING_MODEL,
-            input=texts
+            input=[chunk["text"] for chunk in batch],
         )
 
-        embeddings.extend(response["embeddings"])
+        embeddings.extend(
+            item.embedding
+            for item in response.data
+        )
 
         completed = start + len(batch)
         print(f"Embedded: {completed}/{len(chunks)} chunks")
@@ -123,6 +146,7 @@ def save_embeddings(chunks, embeddings, source):
 
 
 def retrieve_chunks(question, n_results = 4, source=None):
+    client = get_openai_client()
     if not question.strip():
         raise ValueError("Please enter a question.")
 
@@ -142,13 +166,13 @@ def retrieve_chunks(question, n_results = 4, source=None):
     if stored_count == 0:
         raise ValueError("The collection is empty. Index your manual first.")
 
-    response = ollama.embed(
+    response = client.embeddings.create(
         model=EMBEDDING_MODEL,
-        input=f"search_query: {question}"
+        input=question,
     )
-
+    query_embedding = response.data[0].embedding
     query_options = {
-        "query_embeddings": response["embeddings"],
+        "query_embeddings": [query_embedding],
         "n_results": min(n_results, stored_count),
         "include": ["documents", "metadatas", "distances"]
     }
@@ -175,6 +199,7 @@ def retrieve_chunks(question, n_results = 4, source=None):
 
 
 def answer_question(question, n_results=4,source=None):
+    client = get_openai_client()
     matches = retrieve_chunks(question,n_results=n_results,source=source)
 
     if not matches:
@@ -216,28 +241,24 @@ Keep the answer clear and direct.
         f"Question: {question}"
     )
 
-    response = ollama.chat(
+    response = client.chat.completions.create(
         model=CHAT_MODEL,
         messages=[
             {
                 "role": "system",
-                "content": system_prompt
+                "content": system_prompt,
             },
             {
                 "role": "user",
-                "content": user_prompt
-            }
+                "content": user_prompt,
+            },
         ],
-        options={
-            "temperature":0,
-            "num_ctx": 8192
-        },
-        stream=False
+        temperature=0,
     )
 
     return {
-        "answer": response["message"]["content"],
-        "sources": matches
+        "answer": response.choices[0].message.content,
+        "sources": matches,
     }
 
 
