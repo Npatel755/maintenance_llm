@@ -4,7 +4,7 @@ from tempfile import TemporaryDirectory
 
 import streamlit as st
 
-from app.rag import (
+from rag import (
     extract_pdf,
     chunk_pages,
     embed_chunks,
