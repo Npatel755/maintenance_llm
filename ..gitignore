@@ -1,0 +1,10 @@
+.venv/
+venv/
+.maintenence_llm/
+__pycache__/
+*.py[cod]
+chroma_db/
+.env
+.env.*
+!.env.example
+.vscode/
