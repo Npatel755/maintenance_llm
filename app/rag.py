@@ -7,6 +7,7 @@ from google import genai
 
 EMBEDDING_MODEL = "gemini-embedding-001"
 CHAT_MODEL = "gemini-3.8-flash"
+COLLECTION_NAME = "maintenance_manuals_gemini"
 
 def get_gemini_client():
     api_key = os.getenv("GEMINI_API_KEY")
@@ -107,7 +108,7 @@ def save_embeddings(chunks, embeddings, source):
     client = chromadb.PersistentClient(path=str(db_path))
 
     collection = client.get_or_create_collection(
-        name="maintenance_manuals",
+        name=COLLECTION_NAME,
         embedding_function=None,
         configuration={"hnsw": {"space":"cosine"}}
     )
@@ -154,7 +155,7 @@ def retrieve_chunks(question, n_results = 4, source=None):
     client = chromadb.PersistentClient(path=str(db_path))
 
     collection = client.get_collection(
-        name="maintenance_manuals",
+        name=COLLECTION_NAME,
         embedding_function=None
     )
 
